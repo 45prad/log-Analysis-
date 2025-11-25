@@ -10,100 +10,112 @@ function LogDownload() {
     password: ''
   });
   const [authError, setAuthError] = useState('');
-  const [pendingDownload, setPendingDownload] = useState(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [pendingDownload, setPendingDownload] = useState(null); // single log or 'bulk'
 
   // Default credentials
   const defaultUsername = 'admin123';
   const defaultPassword = 'admin123';
 
-  // Pre-defined log files with static information
-  const availableLogFiles = [
-    {
-      filename: 'battery_diagnostics_flight12.ulg',
-      size: '2.3 MB',
-      date: '2024-01-15 14:30:25'
-    },
-    {
-      filename: 'drone_flight_2025-11-16_01.ulg',
-      size: '1.8 MB',
-      date: '2024-01-14 09:15:42'
-    },
-    {
-      filename: 'failsafe_event_flight19.ulg',
-      size: '0.9 MB',
-      date: '2024-01-13 16:45:18'
-    },
-    {
-      filename: 'fc_telemetry_capture_run07.ulg',
-      size: '3.1 MB',
-      date: '2024-01-12 11:20:33'
-    },
-    {
-      filename: 'gps_track_flight_27.ulg',
-      size: '1.5 MB',
-      date: '2024-01-11 13:55:07'
-    },
-    {
-      filename: 'aerologalpha.ulg',
-      size: '2.7 MB',
-      date: '2024-01-10 08:40:51'
-    },
-    {
-      filename: 'missionAlpha.ulg',
-      size: '4.2 MB',
-      date: '2024-01-09 15:25:29'
-    },
-    {
-      filename: 'px4_missionlog_2025-11-16.ulg',
-      size: '1.9 MB',
-      date: '2024-01-08 10:35:44'
-    },
-    {
-      filename: 'uav_flightpath_record_2025_001.ulg',
-      size: '3.5 MB',
-      date: '2024-01-07 12:50:16'
-    },
-    {
-      filename: '15-04-logs.ulg',
-      size: '2.1 MB',
-      date: '2024-01-06 17:05:38'
-    }
-  ];
+  // Sample log files that would be in your public/logs folder
+ const availableLogFiles = [
+  
+  'battery_diagnostics_flight12.ulg',
+  'drone_flight_2025-11-16_01.ulg',
+  'failsafe_event_flight19.ulg',
+  'fc_telemetry_capture_run07.ulg',
+  'gps_track_flight_27.ulg',
+  'aerologalpha.ulg',
+  'missionAlpha.ulg',
+  'px4_missionlog_2025-11-16.ulg',
+  'uav_flightpath_record_2025_001.ulg',
+  '15-04-logs.ulg'
+];
 
-  // Check if file exists by making a HEAD request
-  const checkFileExists = async (filename) => {
+
+  // Function to get file size from the actual file
+  const getFileInfo = async (filename) => {
     try {
-      const response = await fetch(`/logs/${filename}`, { method: 'HEAD' });
-      return response.ok;
+      const response = await fetch(`/logs/${filename}`);
+      if (response.ok) {
+        const contentLength = response.headers.get('content-length');
+        const size = contentLength ? parseInt(contentLength) : 0;
+        
+        // Convert bytes to MB
+        const sizeMB = (size / (1024 * 1024)).toFixed(1);
+        
+        // Get last modified date from headers
+        const lastModified = response.headers.get('last-modified');
+        const date = lastModified ? new Date(lastModified).toLocaleString() : 'Unknown';
+        
+        return {
+          size: `${sizeMB} MB`,
+          date: date,
+          exists: true
+        };
+      }
     } catch (error) {
-      console.error(`Error checking file ${filename}:`, error);
-      return false;
+      console.error(`Error fetching file info for ${filename}:`, error);
     }
+    
+    return {
+      size: '0 MB',
+      date: 'Unknown',
+      exists: false
+    };
   };
 
-  // Initialize logs
+  // Function to get file creation date from filename (fallback)
+  const getDateFromFilename = (filename) => {
+    // Try to extract date from common log filename patterns
+    const datePatterns = [
+      /(\d{4}-\d{2}-\d{2})/, // YYYY-MM-DD
+      /(\d{8})/, // YYYYMMDD
+      /(\d{6})/, // YYMMDD
+    ];
+    
+    for (const pattern of datePatterns) {
+      const match = filename.match(pattern);
+      if (match) {
+        const dateStr = match[1];
+        try {
+          if (dateStr.includes('-')) {
+            return new Date(dateStr).toLocaleString();
+          } else if (dateStr.length === 8) {
+            // YYYYMMDD format
+            const year = dateStr.slice(0, 4);
+            const month = dateStr.slice(4, 6);
+            const day = dateStr.slice(6, 8);
+            return new Date(`${year}-${month}-${day}`).toLocaleString();
+          }
+        } catch (e) {
+          console.error('Error parsing date from filename:', e);
+        }
+      }
+    }
+    
+    // Fallback to current date if no date in filename
+    return new Date().toLocaleString();
+  };
+
+  // Initialize logs with actual file information
   useEffect(() => {
     const initializeLogs = async () => {
-      setIsRefreshing(true);
-      
       const logsWithInfo = await Promise.all(
-        availableLogFiles.map(async (fileInfo, index) => {
-          const exists = await checkFileExists(fileInfo.filename);
+        availableLogFiles.map(async (filename, index) => {
+          const fileInfo = await getFileInfo(filename);
           
           return {
             id: index + 1,
-            date: fileInfo.date,
+            date: fileInfo.exists ? fileInfo.date : getDateFromFilename(filename),
             size: fileInfo.size,
-            status: exists ? 'Complete' : 'Missing',
-            filename: fileInfo.filename,
-            exists: exists
+            status: fileInfo.exists ? 'Complete' : 'Missing',
+            filename: filename,
+            exists: fileInfo.exists
           };
         })
       );
       
       setLogs(logsWithInfo);
-      setIsRefreshing(false);
     };
 
     initializeLogs();
@@ -137,7 +149,7 @@ function LogDownload() {
   };
 
   const handleDownloadWithAuth = (log = null) => {
-    setPendingDownload(log);
+    setPendingDownload(log); // null for bulk, log object for single
     setShowAuthModal(true);
     setAuthError('');
     setAuthCredentials({ username: '', password: '' });
@@ -150,6 +162,7 @@ function LogDownload() {
       setAuthError('');
       setShowAuthModal(false);
       
+      // Execute the pending download
       if (pendingDownload === 'bulk') {
         handleBulkDownload();
       } else if (pendingDownload) {
@@ -172,6 +185,7 @@ function LogDownload() {
 
   const handleSelectAll = (e) => {
     if (e.target.checked) {
+      // Only select logs that exist
       const existingLogs = logs.filter(log => log.exists);
       setSelectedLogs(new Set(existingLogs.map(log => log.id)));
     } else {
@@ -189,39 +203,37 @@ function LogDownload() {
     setSelectedLogs(newSelected);
   };
 
-  // const handleRefresh = async () => {
-  //   setIsRefreshing(true);
+  const handleRefresh = async () => {
+    // Refresh file information
+    const refreshedLogs = await Promise.all(
+      logs.map(async (log) => {
+        const fileInfo = await getFileInfo(log.filename);
+        return {
+          ...log,
+          size: fileInfo.size,
+          date: fileInfo.exists ? fileInfo.date : log.date,
+          status: fileInfo.exists ? 'Complete' : 'Missing',
+          exists: fileInfo.exists
+        };
+      })
+    );
     
-  //   const refreshedLogs = await Promise.all(
-  //     logs.map(async (log) => {
-  //       const exists = await checkFileExists(log.filename);
-  //       return {
-  //         ...log,
-  //         status: exists ? 'Complete' : 'Missing',
-  //         exists: exists
-  //       };
-  //     })
-  //   );
-    
-  //   setLogs(refreshedLogs);
-    
-  //   // Clear selection of missing files
-  //   const newSelected = new Set(selectedLogs);
-  //   refreshedLogs.forEach(log => {
-  //     if (!log.exists && newSelected.has(log.id)) {
-  //       newSelected.delete(log.id);
-  //     }
-  //   });
-  //   setSelectedLogs(newSelected);
-    
-  //   setIsRefreshing(false);
-  // };
+    setLogs(refreshedLogs);
+    // Clear selection of missing files
+    const newSelected = new Set(selectedLogs);
+    refreshedLogs.forEach(log => {
+      if (!log.exists && newSelected.has(log.id)) {
+        newSelected.delete(log.id);
+      }
+    });
+    setSelectedLogs(newSelected);
+  };
 
   const isAllSelected = logs.length > 0 && selectedLogs.size === logs.filter(log => log.exists).length;
 
   return (
     <div className="p-6 h-full flex flex-col">
-      {/* Authentication Modal - keep this part the same */}
+      {/* Authentication Modal */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-96">
@@ -302,6 +314,7 @@ function LogDownload() {
         <p className="text-gray-400 text-sm">
           Log Download allows you to download binary log files from your vehicle.
         </p>
+       
       </div>
 
       <div className="mb-4 flex items-center justify-between">
@@ -313,14 +326,11 @@ function LogDownload() {
         </div>
         <div className="flex gap-2">
           <button 
-            // onClick={handleRefresh}
-            disabled={isRefreshing}
-            className={`bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm flex items-center gap-2 ${
-              isRefreshing ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
+            
+            className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm flex items-center gap-2"
           >
-            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+            <RefreshCw className="w-4 h-4" />
+            Refresh
           </button>
           <button 
             onClick={() => handleDownloadWithAuth('bulk')}
@@ -334,6 +344,7 @@ function LogDownload() {
             <Download className="w-4 h-4" />
             Download ({selectedLogs.size})
           </button>
+       
           <button className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm">
             Cancel
           </button>
@@ -365,7 +376,7 @@ function LogDownload() {
             {logs.length === 0 ? (
               <tr>
                 <td colSpan="7" className="py-8 px-4 text-center text-gray-400">
-                  {isRefreshing ? 'Scanning for log files...' : 'No log files available. Click Refresh to scan for logs.'}
+                  No log files available. Click Refresh to scan for logs.
                 </td>
               </tr>
             ) : (
